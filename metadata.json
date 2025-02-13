@@ -1,0 +1,7 @@
+{
+  "name": "brightness-controller",
+  "description": "Brightness control dock",
+  "uuid": "brightness_control@aynache.com",
+  "shell-version": ["43"],
+  "version": 1
+}
