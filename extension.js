@@ -13,14 +13,15 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * SPDX-License-Identifier: GPL-2.0-or-later
+ * SPDX-License-Identifier: GPL-2.0
  */
 
 /* exported init */
 
-const GETTEXT_DOMAIN = 'my-indicator-extension';
+const GETTEXT_DOMAIN = 'brightness_controller';
 
-const { GObject, St } = imports.gi;
+const { GObject, St, GLib } = imports.gi;
+const ByteArray = imports.byteArray;
 
 const ExtensionUtils = imports.misc.extensionUtils;
 const Main = imports.ui.main;
@@ -29,28 +30,74 @@ const PopupMenu = imports.ui.popupMenu;
 
 const _ = ExtensionUtils.gettext;
 
+/**
+ * Helper function to get a list of connected outputs using xrandr.
+ * Returns an array of output names.
+ */
+function getConnectedOutputs() {
+    // Run the command to query xrandr.
+    let [ok, stdout] = GLib.spawn_command_line_sync("xrandr --query");
+    if (!ok) {
+        log("Failed to run xrandr --query");
+        return [];
+    }
+
+    // Convert the output from a byte array to a string.
+    let output = ByteArray.toString(stdout);
+    let lines = output.split('\n');
+    let outputs = [];
+    for (let line of lines) {
+        // Look for lines that indicate a connected output.
+        if (line.includes(" connected ")) {
+            let parts = line.split(" ");
+            outputs.push(parts[0]);
+        }
+    }
+    return outputs;
+}
+
 const Indicator = GObject.registerClass(
 class Indicator extends PanelMenu.Button {
     _init() {
-        super._init(0.0, _('My Shiny Indicator'));
+        super._init(0.0, _('Brightness Controller'));
 
-        this.add_child(new St.Icon({
-            icon_name: 'face-smile-symbolic',
+        // Create an icon that matches brightness control.
+        let icon = new St.Icon({
+            icon_name: 'display-brightness-symbolic',
             style_class: 'system-status-icon',
-        }));
-
-        let item = new PopupMenu.PopupMenuItem(_('Show Notification'));
-        item.connect('activate', () => {
-            Main.notify(_('Whatʼs up, folks?'));
         });
-        this.menu.addMenuItem(item);
+        this.add_child(icon);
+
+        // Get the connected outputs via xrandr.
+        let outputs = getConnectedOutputs();
+        if (outputs.length === 0) {
+            // If no outputs are found, provide a fallback.
+            outputs = ["default"];
+        }
+
+        // Create a menu item (label + slider) for each output.
+        outputs.forEach((outputName) => {
+            // Label for the output.
+            let labelItem = new PopupMenu.PopupMenuItem(outputName, { reactive: false });
+            this.menu.addMenuItem(labelItem);
+
+            // Slider for brightness. Initialize slider to 1.0 (100% brightness).
+            let sliderItem = new PopupMenu.PopupSliderMenuItem(1.0);
+            sliderItem.connect('value-changed', (slider, value) => {
+                // The xrandr brightness value ranges from 0.0 to 1.0.
+                let command = `xrandr --output ${outputName} --brightness ${value}`;
+                log(`Setting brightness for ${outputName} to ${value}`);
+                // Execute the xrandr command asynchronously.
+                GLib.spawn_command_line_async(command);
+            });
+            this.menu.addMenuItem(sliderItem);
+        });
     }
 });
 
 class Extension {
     constructor(uuid) {
         this._uuid = uuid;
-
         ExtensionUtils.initTranslations(GETTEXT_DOMAIN);
     }
 
@@ -60,8 +107,10 @@ class Extension {
     }
 
     disable() {
-        this._indicator.destroy();
-        this._indicator = null;
+        if (this._indicator) {
+            this._indicator.destroy();
+            this._indicator = null;
+        }
     }
 }
 
