@@ -1,7 +1,3 @@
-# Gnome-brightness-controller
+# Gnome Extension to control the brightness on multiple monitors
 
 
-
-# Testing
-# dbus-run-session -- gnome-shell --nested --wayland
-# gnome-extensions enable brightness_control@aynache.com

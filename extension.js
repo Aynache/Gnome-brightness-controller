@@ -16,104 +16,88 @@
  * SPDX-License-Identifier: GPL-2.0
  */
 
-/* exported init */
-
-const GETTEXT_DOMAIN = 'brightness_controller';
-
-const { GObject, St, GLib } = imports.gi;
-const ByteArray = imports.byteArray;
-
-const ExtensionUtils = imports.misc.extensionUtils;
+const { St, Clutter, GObject, Meta, Gio, GLib } = imports.gi;
 const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
+const Slider = imports.ui.slider;
 
-const _ = ExtensionUtils.gettext;
+let panelButton;
+let buttonLabel;
 
-/**
- * Helper function to get a list of connected outputs using xrandr.
- * Returns an array of output names.
- */
-function getConnectedOutputs() {
-    // Run the command to query xrandr.
-    let [ok, stdout] = GLib.spawn_command_line_sync("xrandr --query");
-    if (!ok) {
-        log("Failed to run xrandr --query");
-        return [];
-    }
 
-    // Convert the output from a byte array to a string.
-    let output = ByteArray.toString(stdout);
-    let lines = output.split('\n');
-    let outputs = [];
-    for (let line of lines) {
-        // Look for lines that indicate a connected output.
-        if (line.includes(" connected ")) {
-            let parts = line.split(" ");
-            outputs.push(parts[0]);
+function getBrightness() {
+    try {
+        let [success, stdout, stderr] = GLib.spawn_command_line_sync('python3 Monitors.py get');
+        if (success) {
+            let brightness = parseInt(stdout.toString().trim(), 10);
+            log(`Current Brightness: ${brightness}`);
+            return brightness;
+        } else {
+            logError(`Error: ${stderr.toString()}`);
+            return null;
         }
-    }
-    return outputs;
-}
-
-const Indicator = GObject.registerClass(
-class Indicator extends PanelMenu.Button {
-    _init() {
-        super._init(0.0, _('Brightness Controller'));
-
-        // Create an icon that matches brightness control.
-        let icon = new St.Icon({
-            icon_name: 'display-brightness-symbolic',
-            style_class: 'system-status-icon',
-        });
-        this.add_child(icon);
-
-        // Get the connected outputs via xrandr.
-        let outputs = getConnectedOutputs();
-        if (outputs.length === 0) {
-            // If no outputs are found, provide a fallback.
-            outputs = ["default"];
-        }
-
-        // Create a menu item (label + slider) for each output.
-        outputs.forEach((outputName) => {
-            // Label for the output.
-            let labelItem = new PopupMenu.PopupMenuItem(outputName, { reactive: false });
-            this.menu.addMenuItem(labelItem);
-
-            // Slider for brightness. Initialize slider to 1.0 (100% brightness).
-            let sliderItem = new PopupMenu.PopupSliderMenuItem(1.0);
-            sliderItem.connect('value-changed', (slider, value) => {
-                // The xrandr brightness value ranges from 0.0 to 1.0.
-                let command = `xrandr --output ${outputName} --brightness ${value}`;
-                log(`Setting brightness for ${outputName} to ${value}`);
-                // Execute the xrandr command asynchronously.
-                GLib.spawn_command_line_async(command);
-            });
-            this.menu.addMenuItem(sliderItem);
-        });
-    }
-});
-
-class Extension {
-    constructor(uuid) {
-        this._uuid = uuid;
-        ExtensionUtils.initTranslations(GETTEXT_DOMAIN);
-    }
-
-    enable() {
-        this._indicator = new Indicator();
-        Main.panel.addToStatusArea(this._uuid, this._indicator);
-    }
-
-    disable() {
-        if (this._indicator) {
-            this._indicator.destroy();
-            this._indicator = null;
-        }
+    } catch (e) {
+        logError(`Failed to run script: ${e}`);
+        return null;
     }
 }
 
-function init(meta) {
-    return new Extension(meta.uuid);
+function getMonitorCount() {
+    let display = global.display;
+    return display.get_n_monitors();
 }
+
+function updateButtonLabel() {
+    let monitorCount = getMonitorCount();
+    buttonLabel.set_text(`Brightness ${monitorCount}`);
+}
+
+function enable() {
+
+    let brightness = getBrightness();
+    log(`Brightness fetched: ${brightness}`);
+
+    // Create a new panel menu button
+    panelButton = new PanelMenu.Button(0.0, 'Brightness Controller', false);
+
+    // Create a label for the button
+    buttonLabel = new St.Label({
+        text: 'Brightness',
+        y_align: Clutter.ActorAlign.CENTER
+    });
+
+    // Update label with the number of monitors
+    updateButtonLabel();
+
+    panelButton.add_child(buttonLabel);
+
+    // Create a slider inside a menu item
+    let sliderMenuItem = new PopupMenu.PopupBaseMenuItem();
+    let slider = new Slider.Slider(brightness);  // 0.5 means 50% initial value
+
+    // Connect a callback to handle slider changes
+    slider.connect('notify::value', () => { 
+        let percentage = Math.round(slider.value * 100);
+        log(`Slider value changed to: ${percentage}%`);
+    });
+
+    // Add the slider to the menu item, then add the item to the button's menu
+    sliderMenuItem.actor.add_child(slider);
+    panelButton.menu.addMenuItem(sliderMenuItem);
+
+    // Add the button to the top bar (status area)
+    Main.panel.addToStatusArea('BrightnessButton', panelButton);
+}
+
+function disable() {
+    // Clean up
+    if (panelButton) {
+        panelButton.destroy();
+        panelButton = null;
+    }
+}
+
+
+
+
