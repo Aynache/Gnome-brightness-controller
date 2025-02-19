@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-#brightness_control.py
 import sys
 
 def set_brightness(value):
