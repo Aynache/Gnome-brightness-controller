@@ -1,110 +1,134 @@
-const { St, Clutter, Gio } = imports.gi;
+const { St, Clutter, GObject, Meta, Gio, GLib } = imports.gi;
 const Main = imports.ui.main;
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
 const Slider = imports.ui.slider;
+const Mainloop = imports.mainloop;
 
-let panelButton;
-let buttonLabel;
-let monitorsChangedSignal;
+const MonitorExtension = GObject.registerClass(
+class MonitorExtension extends PanelMenu.Button {
 
-function getMonitors() {
-    return Main.layoutManager.monitors;
-}
-function updateMonitorCountLabel() {
-    const monitors = getMonitors();
-    buttonLabel.set_text(`Monitors: ${monitors.length}`);
-}
+    _init () {
+        super._init(0.5, "Monitor Count");
+        this._monitors = this._getMonitors();
 
-/**
- * Clear the existing popup menu items and re-populate them, creating
- * one item (icon + slider) per monitor.
- */
-function rebuildPopupMenu() {
-    // Remove any existing items from the popup menu
-    panelButton.menu.removeAll();
-    const monitors = getMonitors();
-    for (let i = 0; i < monitors.length; i++) {
-        // Create a new PopupBaseMenuItem for each monitor
-        const menuItem = new PopupMenu.PopupBaseMenuItem();
-        // Horizontal box to hold icon, label, and slider
-        let hbox = new St.BoxLayout({ vertical: false, x_expand: true });
-        // Icon (using a symbolic icon name; you can choose any icon you like)
-        let icon = new St.Icon({
-            icon_name: 'display-brightness-symbolic',
-            style_class: 'popup-menu-icon'  // ensures consistent sizing
+        this.indicatorText = new St.Label({
+            text: _("Monitors: " + this._monitors.length),
+            y_align: Clutter.ActorAlign.CENTER
         });
-        hbox.add_child(icon);
-        // Optional label: Monitor # (or you could show more info)
-        let label = new St.Label({
-            text: `Screen ${i + 1}`,
-            y_align: Clutter.ActorAlign.CENTER,
-            x_expand: true  // push slider to the right
+        this.add_child(this.indicatorText);
+
+        this._monitorItems = {};
+
+        this._buildMenu();
+        this._refresh();
+
+        this._monitorsChangedSignal = Main.layoutManager.connect('monitors-changed', () => {
+            this._reloadMonitorInfo();
         });
-        hbox.add_child(label);
-
-        // Create a slider (0.0 to 1.0 by default)
-        let slider = new Slider.Slider(0.5);
-        // Listen for changes
-        slider.connect('notify::value', (obj) => {
-            let percentage = Math.round(obj.value * 100);
-            log(`Screen ${i+1}: slider changed to ${percentage}%`);
-            // Here is where you'd set brightness or do something per monitor
-        });
-        hbox.add_child(slider);
-
-        // Add our hbox into the popup menu item
-        menuItem.actor.add_child(hbox);
-
-        // Add the menu item to the panel button’s menu
-        panelButton.menu.addMenuItem(menuItem);
     }
-}
 
-/**
- * Called when the extension is enabled.
- */
-function enable() {
-    // Create the panel button
-    panelButton = new PanelMenu.Button(0.0, 'Monitor Count', false);
-    // Create a label for the top bar button
-    buttonLabel = new St.Label({
-        text: 'Monitors: 0',
-        y_align: Clutter.ActorAlign.CENTER
-    });
-    panelButton.add_child(buttonLabel);
-    // Add the button to the top bar
-    Main.panel.addToStatusArea('monitorCount', panelButton);
-    // Connect to "monitors-changed" so we update the label dynamically
-    monitorsChangedSignal = Main.layoutManager.connect('monitors-changed', () => {
-        updateMonitorCountLabel();
-        rebuildPopupMenu();
-    });
-    // Adjust menu position when shown
-    panelButton.menu.connect('open-state-changed', (menu, isOpen) => {
-        if (isOpen) {
-            setPopupMenuPosition();
+    _buildMenu () {
+        this.menu.removeAll();
+        this.menu.actor.set_width(this.menu.actor.get_width() * 1.3);
+
+        let headerMenuItem = new PopupMenu.PopupMenuItem(_("Monitor Info :"), {
+            reactive: true, hover: false, activate: false
+        });
+        let bin = new St.Bin({
+            x_expand: true,
+            x_align: Clutter.ActorAlign.CENTER,
+        });
+
+        this._monitorLabel = new St.Label({ text: 'Monitor Count: ' + this._monitors.length });
+        bin.add_actor(this._monitorLabel);
+        headerMenuItem.actor.add_actor(bin);
+    
+        this.menu.addMenuItem(headerMenuItem);
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        this._monitorItems = {};
+        
+        for (let i = 0; i < this._monitors.length; i++) {
+            let monitorName = `Display ${i + 1}`;
+            let monitorMenuItem = new PopupMenu.PopupMenuItem(_(monitorName), {
+                reactive: true, hover: false, activate: false
+            });
+    
+            let bin = new St.Bin({
+                x_expand: true,
+                x_align: Clutter.ActorAlign.END,
+            });
+    
+            let monitorLabel = new St.Label();
+            bin.add_actor(monitorLabel);
+    
+            monitorMenuItem.actor.add_actor(bin);
+            this.menu.addMenuItem(monitorMenuItem);
+
+            let sliderMenuItem = new PopupMenu.PopupMenuItem("", {
+                reactive: false
+            });
+            let slider = new Slider.Slider(0.5);
+            sliderMenuItem.actor.add(slider);
+            this.menu.addMenuItem(sliderMenuItem);
+
+            this._monitorItems[i] = {
+                menuItem: monitorMenuItem,
+                sliderMenuItem: sliderMenuItem,
+                label: monitorLabel,
+                slider: slider
+            };
         }
-    });
+    }
 
-    // Initialize
-    updateMonitorCountLabel();
-    rebuildPopupMenu();
+    _refresh () {
+        this._reloadMonitorInfo();
+        this._removeTimeout();
+        this._timeout = Mainloop.timeout_add_seconds(60, this._refresh.bind(this));
+        return true;
+    }
+
+    _reloadMonitorInfo () {
+        this._monitors = this._getMonitors();
+        this._monitorLabel.text = 'Monitor Count: ' + this._monitors.length;
+        this.indicatorText.set_text("Monitors: " + this._monitors.length);
+        this._buildMenu();
+    }
+
+    _getMonitors () {
+        return Main.layoutManager.monitors;
+    }
+
+    _removeTimeout () {
+        if (this._timeout) {
+            Mainloop.source_remove(this._timeout);
+            this._timeout = null;
+        }
+    }
+    
+    stop () {
+        if (this._timeout)
+            Mainloop.source_remove(this._timeout);
+        this._timeout = undefined;
+
+        Main.layoutManager.disconnect(this._monitorsChangedSignal);
+        this.menu.removeAll();
+    }
+        
+});
+
+let menuMonitor;
+
+function enable() {
+    menuMonitor = new MonitorExtension();
+    Main.panel.addToStatusArea('monitor-indicator', menuMonitor);
 }
 
-
-function setPopupMenuPosition() {
-    if (!panelButton || !panelButton.menu) return;
-
-    let buttonBox = panelButton.actor.get_transformed_position();
-    let buttonWidth = panelButton.actor.get_transformed_size()[0];
-
-    let menuBox = panelButton.menu.box.get_transformed_size();
-    let menuWidth = menuBox ? menuBox[0] : 0;
-
-    // Calculate new X position to center the popup
-    let newX = buttonBox[0] + (buttonWidth / 2) - (menuWidth / 2);
-
-    // Set the new position manually
-    panelButton.menu.set_position(newX, buttonBox[1] + buttonWidth);
+function disable() {
+    if (menuMonitor) {
+        menuMonitor.stop();
+        menuMonitor.destroy();
+        menuMonitor = null;
+    }
 }
