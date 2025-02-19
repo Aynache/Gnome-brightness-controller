@@ -30,9 +30,9 @@ class MonitorExtension extends PanelMenu.Button {
 
     _buildMenu () {
         this.menu.removeAll();
-        this.menu.actor.set_width(this.menu.actor.get_width() * 1.3);
+        this.menu.actor.set_width(this.menu.actor.get_width() * 1.5);
 
-        let headerMenuItem = new PopupMenu.PopupMenuItem(_("Monitor Info :"), {
+        let headerMenuItem = new PopupMenu.PopupMenuItem(_("Monitor Info"), {
             reactive: true, hover: false, activate: false
         });
         let bin = new St.Bin({
@@ -50,26 +50,44 @@ class MonitorExtension extends PanelMenu.Button {
         this._monitorItems = {};
         
         for (let i = 0; i < this._monitors.length; i++) {
-            let monitorName = `Display ${i + 1}`;
-            let monitorMenuItem = new PopupMenu.PopupMenuItem(_(monitorName), {
+            let monitorName = `  Screen ${i + 1}`;
+            let monitorMenuItem = new PopupMenu.PopupMenuItem("", {
                 reactive: true, hover: false, activate: false
             });
     
-            let bin = new St.Bin({
-                x_expand: true,
-                x_align: Clutter.ActorAlign.END,
+            let hbox = new St.BoxLayout({ vertical: false, x_expand: true });
+
+            let icon = new St.Icon({
+                icon_name: 'video-display-symbolic',
+                style_class: 'popup-menu-icon'
             });
+            hbox.add_child(icon);
     
-            let monitorLabel = new St.Label();
-            bin.add_actor(monitorLabel);
+            let monitorLabel = new St.Label({
+                text: monitorName,
+                x_expand: true,
+                y_align: Clutter.ActorAlign.CENTER
+            });
+            hbox.add_child(monitorLabel);
     
-            monitorMenuItem.actor.add_actor(bin);
+            monitorMenuItem.actor.add_actor(hbox);
             this.menu.addMenuItem(monitorMenuItem);
 
             let sliderMenuItem = new PopupMenu.PopupMenuItem("", {
                 reactive: false
             });
+            let sliderBox = new St.BoxLayout({ vertical: false, x_expand: true });
+            let brightnessIcon = new St.Icon({
+                icon_name: 'display-brightness-symbolic',
+                style_class: 'popup-menu-icon'
+            });
+            sliderBox.add_child(brightnessIcon);
+            sliderBox.add_child(new St.Label({ text: ' ', x_expand: false, width: 5 }));
+            
             let slider = new Slider.Slider(0.5);
+            sliderBox.add_child(slider);
+            
+            sliderMenuItem.actor.add(sliderBox);
             sliderMenuItem.actor.add(slider);
             this.menu.addMenuItem(sliderMenuItem);
 
